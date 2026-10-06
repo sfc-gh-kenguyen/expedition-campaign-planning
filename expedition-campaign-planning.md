@@ -2,7 +2,7 @@ author: Kevin Nguyen, Snowflake CoCo
 id: expedition-campaign-planning
 categories: snowflake-site:taxonomy/solution-center/certification/quickstart, snowflake-site:taxonomy/product/ai, snowflake-site:taxonomy/product/data-engineering, snowflake-site:taxonomy/feature/cortex-analyst, snowflake-site:taxonomy/feature/semantic-views, snowflake-site:taxonomy/use-case/marketing
 language: en
-summary: Land messy campaign exports in open Apache Iceberg tables, clean and standardize them with CoCo, surface audience collisions on a live campaign timeline, and answer planning questions in plain language with Snowflake CoWork.
+summary: Land messy campaign exports in open Apache Iceberg tables, clean and standardize them with CoCo, surface audience collisions on a live collision heatmap, and answer planning questions in plain language with Snowflake CoWork.
 environments: web
 status: Published
 feedback link: https://github.com/Snowflake-Labs/sfguides/issues
@@ -15,7 +15,7 @@ Duration: 2
 
 Campaign data comes from everywhere: ad platforms, the email & SMS platform, the CRM. Each system has its own names for channels, regions, and audiences, its own date format, and its own copy of the biggest campaigns. So nobody has a single, trustworthy view of what's launching, and teams end up hitting the same audience with competing offers in the same week.
 
-In this hands-on lab you'll fix that for **Meridian Stay**, a fictional global hotel brand, just as its holiday season plan is going live. You'll land the raw campaign exports in open **Apache Iceberg** tables, use **Snowflake CoCo** to clean and standardize them, and surface every audience collision on a live campaign timeline. Then you'll hand the result to the whole team through **Snowflake CoWork**, so anyone can ask *"What's launching in APAC next month?"* and get an answer in seconds.
+In this hands-on lab you'll fix that for **Meridian Stay**, a fictional global hotel brand, just as its holiday season plan is going live. You'll land the raw campaign exports in open **Apache Iceberg** tables, use **Snowflake CoCo** to clean and standardize them, and surface every audience collision on a live collision heatmap. Then you'll hand the result to the whole team through **Snowflake CoWork**, so anyone can ask *"What's launching in APAC next month?"* and get an answer in seconds.
 
 ### Prerequisites
 - No coding experience required. CoCo writes the SQL; you describe what you want and review the result.
@@ -25,7 +25,7 @@ In this hands-on lab you'll fix that for **Meridian Stay**, a fictional global h
 - How to land raw data in **Snowflake-managed Apache Iceberg tables**, an open format that other engines can read
 - How to use **CoCo** to standardize labels, parse dates and budgets, remove duplicates, and filter out cancelled campaigns
 - How to find audience collisions across teams and channels
-- How to run and customize a **Streamlit** campaign timeline with CoCo
+- How to run and customize a **Streamlit** collision heatmap with CoCo
 - How to create a **Semantic View** with CoCo and a **Cortex Agent** backed by it
 - How to investigate business questions in plain language in **Snowflake CoWork**
 
@@ -36,7 +36,7 @@ In this hands-on lab you'll fix that for **Meridian Stay**, a fictional global h
 ### What You'll Build
 - A governed, deduplicated campaign list built from three messy exports, stored as Iceberg
 - A table of every audience collision in Meridian Stay's November 2026 – January 2027 plan
-- A live campaign timeline app
+- A live collision heatmap app
 - A Cortex Agent that answers campaign-planning questions in Snowflake CoWork
 
 <!-- ------------------------ -->
@@ -80,7 +80,7 @@ The root cause is simple: campaign plans live in three systems that don't agree 
 1. **Land** the three exports, exactly as they arrived, in **Apache Iceberg** tables.
 2. **Clean** them with CoCo into one governed campaign list, also stored as Iceberg.
 3. **Find** every audience collision: two campaigns aimed at the same audience in the same region on overlapping dates.
-4. **See** the plan on a live campaign timeline and make collisions stand out.
+4. **See** where collisions cluster on a live heatmap and put a dollar value on them.
 5. **Ask** planning questions in plain language through a Cortex Agent in **Snowflake CoWork**.
 
 Everything through step 4 runs from a **single notebook** (`lab.ipynb`) and a pre-built app in the companion repo. Step 5 is done in the Snowsight UI. Let's get started!
@@ -89,7 +89,7 @@ Everything through step 4 runs from a **single notebook** (`lab.ipynb`) and a pr
 ## Set Up Your Workspace and Notebook
 Duration: 5
 
-There are no setup scripts to run and no SQL worksheets to open first. Your first action is to create a **Git-backed Workspace** that clones the companion repo. The repo contains the notebook you'll run (`lab.ipynb`), the three campaign exports (`data/`), and the timeline app (`campaign_timeline/`).
+There are no setup scripts to run and no SQL worksheets to open first. Your first action is to create a **Git-backed Workspace** that clones the companion repo. The repo contains the notebook you'll run (`lab.ipynb`), the three campaign exports (`data/`), and the collision heatmap app (`campaign_timeline/`).
 
 ### Sign in as ACCOUNTADMIN
 
@@ -180,6 +180,8 @@ Send this prompt to CoCo. Compare the output against the expected output in the 
 > *"Load the three CSV files in the stage @MERIDIAN_STAY.RAW.CAMPAIGN_EXPORTS into their matching Iceberg tables in MERIDIAN_STAY.RAW: paid_media_export.csv into PAID_MEDIA_EXPORT, email_sms_export.csv into EMAIL_SMS_EXPORT, and crm_campaigns_export.csv into CRM_CAMPAIGNS_EXPORT. Use the file format MERIDIAN_STAY.RAW.CSV_FF and load the columns in file order."*
 
 You should see **16**, **10**, and **7** rows loaded. If CoCo's first attempt fails and it retries with a corrected statement, that's normal: it reads the error and fixes its own SQL.
+
+> **Seeing `MATCH_BY_COLUMN_NAME = NONE` at the end of each statement?** That's fine. It tells Snowflake to load columns by position, which is the default and exactly what *"in file order"* asks for.
 
 ![coco_copy](./assets/coco_copy.png)
 
@@ -296,38 +298,44 @@ Five of the nine are in **November**, including the answer to leadership's quest
 Notice what's *not* on the list: the cancelled *Veterans Day Weekend Blitz*. Without the clean-up step, it would have raised two false alarms against *Thanksgiving Getaway Sale* and *Autumn Weekend Escapes*.
 
 <!-- ------------------------ -->
-## See It on a Live Campaign Timeline
+## See Where Collisions Cluster
 Duration: 9
 
-A table of collisions is useful. A view the whole team can look at is better. The companion repo includes a pre-built **Streamlit** app that draws every campaign in `CURATED.CAMPAIGNS` on a timeline.
+A table of collisions is useful. A view the whole team can scan in five seconds is better. The companion repo includes a pre-built **Streamlit** app that turns `CURATED.CAMPAIGNS` into a **collision heatmap** for the whole holiday season.
 
-### Run the timeline
+### Run the heatmap
 
 1. In the Workspace file explorer, open **`campaign_timeline/streamlit_app.py`**.
 
 2. If a banner says *"This file looks like a Streamlit app, but is missing configuration"*, click **Convert to streamlit app**. The Workspace adds the configuration files the app needs.
 
-3. Click **Run**. The app runs privately for you on a container runtime, reads straight from `MERIDIAN_STAY.CURATED.CAMPAIGNS`, and opens on **November 2026**.
+3. Click **Run**. The app runs privately for you on a container runtime and reads straight from `MERIDIAN_STAY.CURATED.CAMPAIGNS`.
 
-![timeline](./assets/timeline.png)
+![heatmap](./assets/heatmap.png)
 
 ### How to read it
 
-- Each **row** is a region and audience, like *North America · Business Travelers*.
-- Each **bar** is a campaign, colored by channel.
-- **Bars that share a row and overlap in time** are aimed at the same people at the same time.
+- Each **row** is a region and audience, like *North America · Business Travelers*. The app opens on only the audiences with competing offers, hottest at the top.
+- Each **column** is a week, from November 2026 through January 2027.
+- A **grey** cell means one campaign is reaching that audience that week, which is fine. An **orange (2)** or **red (3+)** cell means that many campaigns are live for the same people on the same days.
 
-Look at **North America · Business Travelers**: three campaigns owned by three different teams all run between November 16 and 23. Hover over a bar to see its dates, budget, and owner. Use the **Regions** filter to focus on one region, or the **Month** picker to move to December and January.
+Start with the three numbers at the top: **7 of 15** audiences are getting competing offers, and the busiest one, North America · Business Travelers, has **3** campaigns from **3 teams** live at once, peaking **Nov 15 – Nov 28**. Now hover over one of the red cells in the top row: Demand Gen, Loyalty, and Partnerships are all aimed at the same business travelers. This isn't a one-off; it's a planning problem.
 
-### STEP 5 — Make collisions impossible to miss
+Use the **Region** filter to see one region's view: everything on the page, including the numbers at the top, follows it. Pick **EMEA**, and you'll see **1 of 4** EMEA audiences with competing offers. Turn on **Show all audiences** to see the audiences that have no overlaps. Use **Inspect an audience** below the heatmap to see every campaign for one row, with its owner, dates, and budget.
 
-The overlaps are visible, but only if you know where to look. Ask CoCo to bring in the collisions table. With `streamlit_app.py` open, send this prompt:
+### STEP 5 — Put a dollar value on it
 
-> *"Update this app to also load MERIDIAN_STAY.CURATED.CAMPAIGN_COLLISIONS. Color campaigns that are in a collision during the selected month red, add a metric for collisions this month, and list those collisions in a table below the timeline."*
+The heatmap shows *where* the plan collides. Leadership will ask *how much is at stake*. Ask CoCo to bring in the collisions table. With `streamlit_app.py` open, send this prompt:
 
-Review the changes CoCo proposes, accept them, and click **Run** again. For **November 2026** the collisions metric should read **5**, and all three North America business-traveler campaigns should turn red. Switch to **December 2026** to see the next three.
+> *"Update this app to also load MERIDIAN_STAY.CURATED.CAMPAIGN_COLLISIONS. Below the title, add a red banner showing the number of collisions and their combined budget for the selected region. Below the heatmap, add a table of the collisions sorted by overlap start, with campaign A, campaign B, region, audience, overlap start, overlap end, and combined budget."*
 
-![timelinecollisions](./assets/timelinecollisions.png)
+Review the changes CoCo proposes, accept them, and click **Run** again. You should see:
+
+- A red banner reading **9 collisions** and **$557,500** in combined budget with **All regions** selected, and **1 collision** and **$63,000** for **EMEA**
+- A collisions table with **9** rows, starting with the two that begin on **November 9**
+- **5** of the 9 collisions starting in November, matching the cluster of orange and red cells on the left side of the heatmap
+
+![heatmapcollisions](./assets/heatmapcollisions.png)
 
 > **Want to share it?** Click **Deploy** in the Workspace to publish the app to `MERIDIAN_STAY.ANALYTICS` so teammates with access can open it from **Projects » Streamlit**. This step is optional for the lab.
 
@@ -335,7 +343,7 @@ Review the changes CoCo proposes, accept them, and click **Run** again. For **No
 ## Ask It With CoWork
 Duration: 18
 
-The data is clean and the timeline is live. Now make it available to everyone, in plain language. You'll create a **Semantic View** with CoCo, a **Cortex Agent** backed by it, and investigate the plan in **Snowflake CoWork**. This happens in the Snowsight UI; no SQL is required.
+The data is clean and the heatmap is live. Now make it available to everyone, in plain language. You'll create a **Semantic View** with CoCo, a **Cortex Agent** backed by it, and investigate the plan in **Snowflake CoWork**. This happens in the Snowsight UI; no SQL is required.
 
 ### STEP 1 — Create the Semantic View with CoCo
 
@@ -358,20 +366,25 @@ A Semantic View describes your data in **business terms**: which columns are dim
 > - *Location: MERIDIAN_STAY.ANALYTICS*
 > - *Source tables: MERIDIAN_STAY.CURATED.CAMPAIGNS and MERIDIAN_STAY.CURATED.CAMPAIGN_COLLISIONS*
 > - *Use campaign_id as the unique key for CAMPAIGNS, and add clear descriptions and synonyms for region, audience, and channel*
+> - *Make BUDGET_USD a fact on CAMPAIGNS, and make COMBINED_BUDGET_USD and OVERLAP_DAYS facts on CAMPAIGN_COLLISIONS*
+> - *Make START_DATE and END_DATE time dimensions on CAMPAIGNS, and OVERLAP_START and OVERLAP_END time dimensions on CAMPAIGN_COLLISIONS*
 > - *Add this verified query for "Which campaigns collide, and how much combined budget is involved?": SELECT campaign_a_name, campaign_b_name, region, audience, overlap_start, overlap_end, combined_budget_usd FROM MERIDIAN_STAY.CURATED.CAMPAIGN_COLLISIONS ORDER BY overlap_start"*
 
-5. Review what CoCo built. Its summary should show:
-   - **CAMPAIGN_ID** as the primary key on `CAMPAIGNS`
-   - **Descriptions** on every column
-   - **Synonyms** on region (*geography, market, territory*), audience (*segment, target group*), and channel (*medium, platform*)
-   - **Budget columns and overlap days** as facts
-   - **One verified query**
+5. Allow CoCo to create the Semantic View draft in the Workspace. This creates an editable draft; it does not publish the view yet.
 
-6. CoCo then offers next steps such as *Deploy*, *Generate descriptions*, *Suggest relationships*, and *Audit*. Reply **Deploy**. If Snowsight shows a **Publish** dialog, confirm **Name** `CAMPAIGN_PLANNING_SV`, **Database** `MERIDIAN_STAY`, and **Schema** `ANALYTICS`, then click **Publish**.
+6. Review the draft in the Semantic View editor. Confirm it contains:
+   - Both `CAMPAIGNS` and `CAMPAIGN_COLLISIONS`, with `CAMPAIGN_ID` as the unique key for `CAMPAIGNS`
+   - `BUDGET_USD` under **Facts** for `CAMPAIGNS`
+   - `COMBINED_BUDGET_USD` and `OVERLAP_DAYS` under **Facts** for `CAMPAIGN_COLLISIONS`
+   - `START_DATE` and `END_DATE` under **Time Dimensions** for `CAMPAIGNS`, and `OVERLAP_START` and `OVERLAP_END` under **Time Dimensions** for `CAMPAIGN_COLLISIONS`
+   - Synonyms on `REGION` (*geography, market, territory*), `AUDIENCE` (*segment, target group*), and `CHANNEL` (*medium, platform*)
+   - One verified query: *"Which campaigns collide, and how much combined budget is involved?"*
 
-![deploysv](./assets/deploysv.png)
+   CoCo may also add metrics, such as a total budget, or extra synonyms. That's fine. If one of the items above differs, for example `OVERLAP_DAYS` landing under **Dimensions**, ask CoCo to fix it (*"Make OVERLAP_DAYS a fact"*) before publishing.
 
-> **Why skip relationships?** Each collision row points at *two* campaigns (A and B). A join on both can confuse the agent, and every question in this lab can be answered from a single table. The descriptions and synonyms matter more: they're what lets someone ask about *"territory"* or *"segment"* and still get the right answer.
+7. Click **Publish** in the top right of the editor. In the dialog, confirm **Name** `CAMPAIGN_PLANNING_SV`, **Database** `MERIDIAN_STAY`, and **Schema** `ANALYTICS`, then click **Publish**. Confirm the published view appears under `MERIDIAN_STAY.ANALYTICS` before adding it to the agent.
+
+![publishsv](./assets/publishsv.png)
 
 > **Prefer to click through it yourself?** Choose **Guided wizard** in step 3 instead, select both `CURATED` tables and all columns, name it `CAMPAIGN_PLANNING_SV` in `MERIDIAN_STAY.ANALYTICS`, and click **Publish**.
 
@@ -476,20 +489,20 @@ DROP DATABASE IF EXISTS MERIDIAN_STAY;
 DROP API INTEGRATION IF EXISTS GITHUB_MERIDIAN_LAB;
 ```
 
-> **Note:** Dropping `MERIDIAN_STAY` cascades to everything inside it. If you deployed the timeline app to `MERIDIAN_STAY.ANALYTICS`, it's removed too.
+> **Note:** Dropping `MERIDIAN_STAY` cascades to everything inside it. If you deployed the heatmap app to `MERIDIAN_STAY.ANALYTICS`, it's removed too.
 
 <!-- ------------------------ -->
 ## Conclusion And Resources
 Duration: 1
 
-Congratulations! You took Meridian Stay's holiday campaign plan from three disconnected exports to a shared timeline and an agent anyone can ask, prompting CoCo along the way.
+Congratulations! You took Meridian Stay's holiday campaign plan from three disconnected exports to a shared collision heatmap and an agent anyone can ask, prompting CoCo along the way.
 
 ### What You Learned
 
 - Landed raw exports in **Snowflake-managed Apache Iceberg tables**, keeping the data in an open format
 - Used **CoCo** to standardize labels, parse three date formats and text budgets, remove cross-system duplicates, and drop cancelled campaigns
 - Found **9 audience collisions** worth **$557,500** in combined budget, including a three-way North America business-traveler pile-up and a repeat of last year's Black Friday overlap
-- Ran a **Streamlit** campaign timeline and used CoCo to highlight collisions
+- Ran a **Streamlit** collision heatmap and used CoCo to add the collisions and their combined budget
 - Created a **Semantic View** with CoCo and a **Cortex Agent** backed by it
 - Investigated the plan in plain language in **Snowflake CoWork**
 

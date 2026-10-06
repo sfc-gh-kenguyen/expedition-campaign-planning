@@ -6,7 +6,7 @@ In this 60-minute lab you help **Meridian Stay**, a fictional global hotel brand
 
 > **Which of our campaigns are about to hit the same audience at the same time?**
 
-You land messy campaign exports in open **Apache Iceberg** tables, clean and standardize them by prompting **Snowflake CoCo**, see the plan on a live campaign timeline, and then ask planning questions in plain language through a Cortex Agent in **Snowflake CoWork**. The plan covers Meridian Stay's holiday season, November 2026 through January 2027.
+You land messy campaign exports in open **Apache Iceberg** tables, clean and standardize them by prompting **Snowflake CoCo**, see where collisions cluster on a live heatmap, and then ask planning questions in plain language through a Cortex Agent in **Snowflake CoWork**. The plan covers Meridian Stay's holiday season, November 2026 through January 2027.
 
 ## What's in this repo
 
@@ -14,7 +14,7 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 |---|---|
 | **`lab.ipynb`** | The notebook you run. It walks through landing, cleaning, and collision detection cell by cell, with CoCo prompts shown inline. |
 | **`data/`** | The three raw campaign exports (`paid_media_export.csv`, `email_sms_export.csv`, `crm_campaigns_export.csv`) and `generate_data.py`, which regenerates them. |
-| **`campaign_timeline/streamlit_app.py`** | The pre-built campaign timeline app. You run it from the Workspace, then extend it with CoCo. |
+| **`campaign_timeline/streamlit_app.py`** | The pre-built collision heatmap app. You run it from the Workspace, then extend it with CoCo. |
 | **`expedition-campaign-planning.md`** | The step-by-step guide. |
 | **`README.md`** | This file. |
 
@@ -28,7 +28,7 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 - `CURATED.CAMPAIGN_COLLISIONS`: every pair of campaigns that target the same region and audience on overlapping dates (9 collisions, $557,500 combined budget). Stored as Iceberg.
 
 **See**
-- A Streamlit campaign timeline (one row per region and audience), customized with CoCo to highlight colliding campaigns in red.
+- A Streamlit collision heatmap (one row per region and audience, one column per week), extended with CoCo to show the collisions and their combined budget.
 
 **Ask** (done in the Snowsight UI; see the guide)
 - A **Semantic View** created with CoCo.
@@ -64,7 +64,9 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 | `CURATED.CAMPAIGN_COLLISIONS` rows | 9 (5 in November, 3 in December, 1 in January) |
 | Combined budget across collisions | $557,500 |
 | Region and audience with the most collisions | North America, Business Travelers (3, all in November 2026) |
-| Collisions metric in the timeline for November 2026 (after STEP 5) | 5 |
+| Audiences with 2+ campaigns live at once (heatmap) | 7 of 15 |
+| Hottest cell (heatmap) | North America · Business Travelers, weeks of Nov 15 and Nov 22 (3 live at once) |
+| Banner in the app (after STEP 5) | 9 collisions, $557,500 (All regions); 1 collision, $63,000 (EMEA) |
 
 ## Prerequisites
 

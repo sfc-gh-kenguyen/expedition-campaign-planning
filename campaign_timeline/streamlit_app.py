@@ -1,5 +1,4 @@
-import calendar
-from datetime import date, timedelta
+from datetime import timedelta
 
 import altair as alt
 import pandas as pd
@@ -7,14 +6,8 @@ import streamlit as st
 
 st.set_page_config(layout="wide")
 
-CHANNEL_COLORS = {
-    "Paid Social": "#1f77b4",
-    "Paid Search": "#2ca02c",
-    "Display": "#9467bd",
-    "Email": "#ff7f0e",
-    "SMS": "#17becf",
-}
-DEFAULT_MONTH = date(2026, 11, 1)
+# Cell colors by how many campaigns are live for the same audience on the same day.
+HEAT_COLORS = {"1": "#eceff3", "2": "#f39c4a", "3+": "#d62728"}
 
 conn = st.connection("snowflake")
 
@@ -24,112 +17,159 @@ def load_campaigns() -> pd.DataFrame:
     df = conn.query(
         """
         SELECT campaign_id, campaign_name, channel, region, audience,
-               start_date, end_date, budget_usd, owner_team, status, source_system
+               start_date, end_date, budget_usd, owner_team
         FROM MERIDIAN_STAY.CURATED.CAMPAIGNS
         ORDER BY region, audience, start_date
         """
     )
     df.columns = [c.lower() for c in df.columns]
-    df["start_date"] = pd.to_datetime(df["start_date"]).dt.date
-    df["end_date"] = pd.to_datetime(df["end_date"]).dt.date
+    df["start_date"] = pd.to_datetime(df["start_date"])
+    df["end_date"] = pd.to_datetime(df["end_date"])
     df["lane"] = df["region"] + " · " + df["audience"]
     return df
 
 
-def month_options(df: pd.DataFrame) -> list[date]:
-    first = df["start_date"].min().replace(day=1)
-    last = df["end_date"].max().replace(day=1)
-    return [m.date() for m in pd.date_range(first, last, freq="MS")]
+def week_start(day: pd.Timestamp) -> pd.Timestamp:
+    """Weeks start on Sunday."""
+    return day - timedelta(days=(day.dayofweek + 1) % 7)
 
 
-def timeline_chart(df: pd.DataFrame, month_start: date, month_end: date) -> alt.Chart:
-    """One row per region · audience; campaigns that share a row and overlap in time compete for the same people."""
-    plot = df.copy()
-    # Clip bars to the selected month so long-running campaigns don't stretch the axis.
-    plot["bar_start"] = plot["start_date"].clip(lower=month_start)
-    plot["bar_end"] = plot["end_date"].clip(upper=month_end) + timedelta(days=1)
-    plot["bar_start"] = pd.to_datetime(plot["bar_start"])
-    plot["bar_end"] = pd.to_datetime(plot["bar_end"])
-    lanes = sorted(plot["lane"].unique())
+def daily_live(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per campaign per day it is live."""
+    days = [
+        (row.lane, day, row.campaign_name, row.owner_team)
+        for row in df.itertuples()
+        for day in pd.date_range(row.start_date, row.end_date)
+    ]
+    daily = pd.DataFrame(days, columns=["lane", "day", "campaign", "team"])
+    daily["week"] = daily["day"].map(week_start)
+    return daily
 
-    bars = (
-        alt.Chart(plot)
-        .mark_bar(cornerRadius=3, height={"band": 0.85})
-        .encode(
-            x=alt.X(
-                "bar_start:T",
-                title=None,
-                scale=alt.Scale(domain=[pd.Timestamp(month_start), pd.Timestamp(month_end + timedelta(days=1))]),
-                axis=alt.Axis(format="%b %d", tickCount="week", grid=True),
-            ),
-            x2="bar_end:T",
-            y=alt.Y("lane:N", title=None, sort=lanes, axis=alt.Axis(labelLimit=260)),
-            yOffset=alt.YOffset("campaign_name:N"),
-            color=alt.Color(
-                "channel:N",
-                title="Channel",
-                scale=alt.Scale(domain=list(CHANNEL_COLORS), range=list(CHANNEL_COLORS.values())),
-                legend=alt.Legend(orient="top"),
-            ),
-            tooltip=[
-                alt.Tooltip("campaign_name:N", title="Campaign"),
-                alt.Tooltip("channel:N", title="Channel"),
-                alt.Tooltip("region:N", title="Region"),
-                alt.Tooltip("audience:N", title="Audience"),
-                alt.Tooltip("start_date:N", title="Starts"),
-                alt.Tooltip("end_date:N", title="Ends"),
-                alt.Tooltip("budget_usd:Q", title="Budget (USD)", format="$,.0f"),
-                alt.Tooltip("owner_team:N", title="Owner"),
-            ],
-        )
+
+def weekly_heat(daily: pd.DataFrame) -> pd.DataFrame:
+    """One row per audience and week: the most campaigns live on any single day, and who was running."""
+    peak = (
+        daily.groupby(["lane", "week", "day"]).size()
+        .groupby(["lane", "week"]).max()
+        .rename("peak")
     )
-    height = max(260, 30 * len(plot) + 20 * len(lanes))
-    return bars.properties(height=height)
+    running = (
+        daily.assign(who=daily["campaign"] + " (" + daily["team"] + ")")
+        .drop_duplicates(["lane", "week", "who"])
+        .groupby(["lane", "week"])["who"]
+        .agg(lambda c: " · ".join(sorted(c)))
+        .rename("campaigns")
+    )
+    heat = pd.concat([peak, running], axis=1).reset_index()
+    heat["level"] = heat["peak"].map(lambda p: "3+" if p >= 3 else str(p))
+    heat["week_key"] = heat["week"].dt.strftime("%Y-%m-%d")
+    heat["week_label"] = heat["week"].dt.strftime("%b %-d")
+    return heat
 
 
-st.title("Meridian Stay campaign timeline")
+def week_axis_labels(weeks: list[pd.Timestamp]) -> str:
+    """Vega expression that shows the month name on the first week of each month and the day number elsewhere."""
+    labels, last_month = {}, None
+    for w in weeks:
+        labels[w.strftime("%Y-%m-%d")] = w.strftime("%b %-d") if w.month != last_month else w.strftime("%-d")
+        last_month = w.month
+    pairs = ", ".join(f"'{k}': '{v}'" for k, v in labels.items())
+    return f"{{{pairs}}}[datum.value]"
+
+
+def heatmap(heat: pd.DataFrame, lanes: list[str], weeks: list[pd.Timestamp]) -> alt.Chart:
+    """Weeks are the whole season, so the axis stays the same when you filter to one region."""
+    base = alt.Chart(heat[heat["lane"].isin(lanes)]).encode(
+        x=alt.X(
+            "week_key:O",
+            title=None,
+            sort=[w.strftime("%Y-%m-%d") for w in weeks],
+            scale=alt.Scale(domain=[w.strftime("%Y-%m-%d") for w in weeks]),
+            axis=alt.Axis(labelAngle=0, labelExpr=week_axis_labels(weeks), labelFontSize=12, orient="top", ticks=False, domain=False),
+        ),
+        y=alt.Y("lane:N", title=None, sort=lanes, axis=alt.Axis(labelLimit=320, labelFontSize=13, labelColor="#1f2a37", ticks=False, domain=False)),
+    )
+    cells = base.mark_rect(cornerRadius=4, stroke="white", strokeWidth=3).encode(
+        color=alt.Color(
+            "level:N",
+            title="Live at once",
+            scale=alt.Scale(domain=list(HEAT_COLORS), range=list(HEAT_COLORS.values())),
+            legend=alt.Legend(orient="bottom", direction="horizontal", titleFontSize=12, labelFontSize=12),
+        ),
+        tooltip=[
+            alt.Tooltip("lane:N", title="Region · audience"),
+            alt.Tooltip("week_label:N", title="Week of"),
+            alt.Tooltip("peak:Q", title="Live at once"),
+            alt.Tooltip("campaigns:N", title="Running that week (owner)"),
+        ],
+    )
+    # Only the hot cells get a number, so they're the only thing that stands out.
+    labels = base.transform_filter("datum.peak >= 2").mark_text(fontSize=14, fontWeight="bold", color="white").encode(text="peak:Q")
+    return (cells + labels).properties(height={"step": 44})
+
+
+st.title("Meridian Stay: where are we hitting the same people twice?")
 st.caption(
-    "Every planned campaign from the ad platforms, the email & SMS platform, and the CRM, in one view. "
-    "Each row is a region and audience. Bars that share a row and overlap in time are competing for the same people."
+    "Every campaign from the ad platforms, the email & SMS platform, and the CRM, November 2026 through January 2027. "
+    "Each row is a region and audience; each column is a week. Orange and red cells mean the same people are "
+    "getting competing offers on the same days. Hover over a cell to see who's running."
 )
 
 campaigns = load_campaigns()
-months = month_options(campaigns)
+season_weeks = list(pd.date_range(
+    week_start(campaigns["start_date"].min()), week_start(campaigns["end_date"].max()), freq="7D"
+))
+f1, f2 = st.columns([1, 3], vertical_alignment="bottom")
+region = f1.selectbox("Region", ["All regions"] + sorted(campaigns["region"].unique()))
+show_all = f2.toggle("Show all audiences", value=False, help="By default, only audiences with competing offers are shown.")
+if region != "All regions":
+    campaigns = campaigns[campaigns["region"] == region]
 
-col_month, col_region = st.columns([1, 3])
-selected_month = col_month.selectbox(
-    "Month",
-    months,
-    index=months.index(DEFAULT_MONTH) if DEFAULT_MONTH in months else 0,
-    format_func=lambda m: m.strftime("%B %Y"),
-)
-regions = sorted(campaigns["region"].unique())
-selected_regions = col_region.multiselect("Regions", regions, default=regions)
+daily = daily_live(campaigns)
+heat = weekly_heat(daily)
 
-month_end = date(
-    selected_month.year,
-    selected_month.month,
-    calendar.monthrange(selected_month.year, selected_month.month)[1],
+peak_by_lane = heat.groupby("lane")["peak"].max()
+colliding = peak_by_lane[peak_by_lane >= 2]
+order = (
+    peak_by_lane.reset_index()
+    .sort_values(["peak", "lane"], ascending=[False, True])["lane"]
+    .tolist()
 )
-in_month = campaigns[
-    (campaigns["start_date"] <= month_end)
-    & (campaigns["end_date"] >= selected_month)
-    & (campaigns["region"].isin(selected_regions))
-]
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Campaigns running", len(in_month))
-m2.metric("Budget in flight", f"${in_month['budget_usd'].sum():,.0f}")
-m3.metric("Channels active", in_month["channel"].nunique())
-
-if in_month.empty:
-    st.info("No campaigns match the selected month and regions.")
+m1.metric("Audiences getting competing offers", f"{len(colliding)} of {len(peak_by_lane)}")
+if colliding.empty:
+    m2.metric("Most campaigns at once", "1")
+    m2.caption("No audience gets more than one campaign at a time.")
 else:
-    st.altair_chart(timeline_chart(in_month, selected_month, month_end), width="stretch")
+    # The busiest audience in scope, the teams live on its busiest day, and the weeks it peaks.
+    top = heat.sort_values(["peak", "week"], ascending=[False, True]).iloc[0]
+    top_days = daily[daily["lane"] == top["lane"]]
+    busiest_day = top_days.groupby("day").size().idxmax()
+    teams = sorted(top_days.loc[top_days["day"] == busiest_day, "team"].unique())
+    peak_weeks = heat.loc[(heat["lane"] == top["lane"]) & (heat["peak"] == top["peak"]), "week"]
+    m2.metric("Most campaigns at once", f"{top['peak']}")
+    m2.caption(f"{top['lane']} · {len(teams)} {'team' if len(teams) == 1 else 'teams'}: {', '.join(teams)}")
+    m3.metric("Peak weeks", f"{peak_weeks.min():%b %-d} – {peak_weeks.max() + timedelta(days=6):%b %-d}")
+    m3.caption(top["lane"])
 
-    with st.expander("Campaigns running this month", expanded=False):
-        st.dataframe(
-            in_month[["campaign_name", "channel", "region", "audience", "start_date", "end_date", "budget_usd", "owner_team"]],
-            hide_index=True,
-            width="stretch",
-        )
+lanes = order if show_all else [lane for lane in order if lane in colliding.index]
+if not lanes:
+    st.info("No competing offers here. Turn on **Show all audiences** to see every campaign.")
+
+st.altair_chart(heatmap(heat, lanes, season_weeks), width="stretch")
+
+st.subheader("Inspect an audience")
+selected_lane = st.selectbox("Region · audience", order)
+st.dataframe(
+    campaigns.loc[
+        campaigns["lane"] == selected_lane,
+        ["campaign_name", "owner_team", "channel", "start_date", "end_date", "budget_usd"],
+    ].assign(
+        start_date=lambda d: d["start_date"].dt.date,
+        end_date=lambda d: d["end_date"].dt.date,
+        budget_usd=lambda d: d["budget_usd"].map("${:,.0f}".format),
+    ),
+    hide_index=True,
+    width="stretch",
+)
