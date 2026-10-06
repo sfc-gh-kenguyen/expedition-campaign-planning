@@ -382,7 +382,7 @@ A Semantic View describes your data in **business terms**: which columns are dim
 
    CoCo may also add metrics, such as a total budget, or extra synonyms. That's fine. If one of the items above differs, for example `OVERLAP_DAYS` landing under **Dimensions**, ask CoCo to fix it (*"Make OVERLAP_DAYS a fact"*) before publishing.
 
-7. Click **Publish** in the top right of the editor. In the dialog, confirm **Name** `CAMPAIGN_PLANNING_SV`, **Database** `MERIDIAN_STAY`, and **Schema** `ANALYTICS`, then click **Publish**. Confirm the published view appears under `MERIDIAN_STAY.ANALYTICS` before adding it to the agent.
+7. Click **Publish** in the top right of the editor. In the dialog, confirm **Name** `CAMPAIGN_PLANNING_SV`, **Database** `MERIDIAN_STAY`, and **Schema** `ANALYTICS`, then click **Publish**.
 
 ![publishsv](./assets/publishsv.png)
 
