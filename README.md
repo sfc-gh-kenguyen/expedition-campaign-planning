@@ -6,7 +6,7 @@ In this 60-minute lab you help **Meridian Stay**, a fictional global hotel brand
 
 > **Which of our campaigns are about to hit the same audience at the same time?**
 
-You land messy campaign exports in open **Apache Iceberg** tables, clean and standardize them by prompting **Snowflake CoCo**, see the plan on a live campaign calendar, and then ask planning questions in plain language through a Cortex Agent in **Snowflake CoWork**.
+You land messy campaign exports in open **Apache Iceberg** tables, clean and standardize them by prompting **Snowflake CoCo**, see the plan on a live campaign timeline, and then ask planning questions in plain language through a Cortex Agent in **Snowflake CoWork**. The plan covers Meridian Stay's holiday season, November 2026 through January 2027.
 
 ## What's in this repo
 
@@ -14,7 +14,7 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 |---|---|
 | **`lab.ipynb`** | The notebook you run. It walks through landing, cleaning, and collision detection cell by cell, with CoCo prompts shown inline. |
 | **`data/`** | The three raw campaign exports (`paid_media_export.csv`, `email_sms_export.csv`, `crm_campaigns_export.csv`) and `generate_data.py`, which regenerates them. |
-| **`campaign_calendar/streamlit_app.py`** | The pre-built campaign calendar app. You run it from the Workspace, then extend it with CoCo. |
+| **`campaign_timeline/streamlit_app.py`** | The pre-built campaign timeline app. You run it from the Workspace, then extend it with CoCo. |
 | **`expedition-campaign-planning.md`** | The step-by-step guide. |
 | **`README.md`** | This file. |
 
@@ -28,12 +28,12 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 - `CURATED.CAMPAIGN_COLLISIONS`: every pair of campaigns that target the same region and audience on overlapping dates (9 collisions, $557,500 combined budget). Stored as Iceberg.
 
 **See**
-- A Streamlit campaign calendar, customized with CoCo to outline colliding campaigns in red.
+- A Streamlit campaign timeline (one row per region and audience), customized with CoCo to highlight colliding campaigns in red.
 
 **Ask** (done in the Snowsight UI; see the guide)
-- A **Semantic View** created with Autopilot.
+- A **Semantic View** created with CoCo.
 - A **Cortex Agent** backed by the Semantic View.
-- **Snowflake CoWork**, where you ask questions like *"What's launching in APAC in December 2026?"*
+- **Snowflake CoWork**, where you ask questions like *"Which collisions are happening in November 2026?"*
 
 ## Data layers
 
@@ -48,11 +48,11 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 | Problem | Example |
 |---|---|
 | Different labels per system | `fb_ads` / `meta` / `Social Media` are all Paid Social; `NA` / `US & Canada` / `N. America` are all North America |
-| Three date formats | `2026-10-05`, `10/12/2026`, `Oct 05, 2026` |
+| Three date formats | `2026-11-02`, `11/09/2026`, `Nov 02, 2026` |
 | Budgets stored as text | `"$65,000"` |
-| Cross-system duplicates | The CRM re-lists *Fall Getaway Sale* (trailing space), *BLACK FRIDAY MEGA SALE*, and *Brand Awareness: Meridian Moments* |
+| Cross-system duplicates | The CRM re-lists *Thanksgiving Getaway Sale* (trailing space), *BLACK FRIDAY MEGA SALE*, and *Brand Awareness: Meridian Moments* |
 | Re-export duplicates | Two paid media rows appear twice |
-| A cancelled campaign | *Columbus Day Weekend Blitz* is cancelled in the CRM; left in, it causes two false collisions |
+| A cancelled campaign | *Veterans Day Weekend Blitz* is cancelled in the CRM; left in, it causes two false collisions |
 
 ## Answer key
 
@@ -61,9 +61,10 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 | Rows loaded (ad platforms / email & SMS / CRM) | 16 / 10 / 7 |
 | `CURATED.CAMPAIGNS` rows | 27 |
 | Unmapped channel / region / audience / date / budget values | 0 |
-| `CURATED.CAMPAIGN_COLLISIONS` rows | 9 |
+| `CURATED.CAMPAIGN_COLLISIONS` rows | 9 (5 in November, 3 in December, 1 in January) |
 | Combined budget across collisions | $557,500 |
-| Region and audience with the most collisions | North America, Business Travelers (3, all in October 2026) |
+| Region and audience with the most collisions | North America, Business Travelers (3, all in November 2026) |
+| Collisions metric in the timeline for November 2026 (after STEP 5) | 5 |
 
 ## Prerequisites
 
@@ -76,7 +77,7 @@ You land messy campaign exports in open **Apache Iceberg** tables, clean and sta
 2. **Create a Git-backed Workspace**: *Projects » Workspaces » + » Create new Git workspace*, using this repo's URL. When prompted, create a Git API integration named `GITHUB_MERIDIAN_LAB` with this repo's GitHub organization as the allowed prefix, and check **Public repository**.
 3. **Open `lab.ipynb`**, click **Connect → Create and connect**, and set Role = `ACCOUNTADMIN`, Warehouse = `COMPUTE_WH`.
 4. **Run the cells top to bottom.** Where a markdown cell shows a CoCo prompt, open the **CoCo** panel, paste the prompt, compare the SQL with the expected output, and click **Allow**.
-5. **Open `campaign_calendar/streamlit_app.py`** and click **Run**.
+5. **Open `campaign_timeline/streamlit_app.py`**, click **Convert to streamlit app** if prompted, and click **Run**.
 6. **Create the Semantic View and Cortex Agent, then ask your questions in CoWork**, following the *"Ask It With CoWork"* section of the guide.
 
 ## Regenerating the data
